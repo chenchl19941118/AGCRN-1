@@ -6,6 +6,7 @@ import copy
 import numpy as np
 from lib.logger import get_logger
 from lib.metrics import All_Metrics
+import ipdb
 
 class Trainer(object):
     def __init__(self, model, loss, optimizer, train_loader, val_loader, test_loader,
@@ -41,11 +42,18 @@ class Trainer(object):
 
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(val_dataloader):
+                T_data = data[...,1:]
+                
                 data = data[..., :self.args.input_dim]
                 label = target[..., :self.args.output_dim]
-                output = self.model(data, target, teacher_forcing_ratio=0.)
+                
+                
+                output = self.model(data, target, T_data, teacher_forcing_ratio=0.)
+                
+                
                 if self.args.real_value:
                     label = self.scaler.inverse_transform(label)
+                
                 loss = self.loss(output.cuda(), label)
                 #a whole batch of Metr_LA is filtered
                 if not torch.isnan(loss):
@@ -57,9 +65,13 @@ class Trainer(object):
     def train_epoch(self, epoch):
         self.model.train()
         total_loss = 0
+        total_loss1 = 0
+        total_loss2 = 0
         for batch_idx, (data, target) in enumerate(self.train_loader):
+            T_data = data[...,1:]
             data = data[..., :self.args.input_dim]
             label = target[..., :self.args.output_dim]  # (..., 1)
+        
             self.optimizer.zero_grad()
 
             #teacher_forcing for RNN encoder-decoder model
@@ -70,10 +82,13 @@ class Trainer(object):
             else:
                 teacher_forcing_ratio = 1.
             #data and target shape: B, T, N, F; output shape: B, T, N, F
-            output = self.model(data, target, teacher_forcing_ratio=teacher_forcing_ratio)
+            output = self.model(data, target, T_data, teacher_forcing_ratio=teacher_forcing_ratio)
+                        
             if self.args.real_value:
                 label = self.scaler.inverse_transform(label)
-            loss = self.loss(output.cuda(), label)
+                
+            loss = self.loss(output.cuda(), label) 
+            
             loss.backward()
 
             # add max grad clipping
@@ -171,11 +186,15 @@ class Trainer(object):
         model.eval()
         y_pred = []
         y_true = []
+        
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(data_loader):
+#                if batch_idx == len(data_loader)-1:
+#                    break
+                T_data = data[...,1:]
                 data = data[..., :args.input_dim]
                 label = target[..., :args.output_dim]
-                output = model(data, target, teacher_forcing_ratio=0)
+                output = model(data, target, T_data, teacher_forcing_ratio=0)
                 y_true.append(label)
                 y_pred.append(output)
         y_true = scaler.inverse_transform(torch.cat(y_true, dim=0))
@@ -193,7 +212,6 @@ class Trainer(object):
         mae, rmse, mape, _, _ = All_Metrics(y_pred, y_true, args.mae_thresh, args.mape_thresh)
         logger.info("Average Horizon, MAE: {:.2f}, RMSE: {:.2f}, MAPE: {:.4f}%".format(
                     mae, rmse, mape*100))
-
     @staticmethod
     def _compute_sampling_threshold(global_step, k):
         """
