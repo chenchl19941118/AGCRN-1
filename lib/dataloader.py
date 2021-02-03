@@ -86,6 +86,26 @@ def get_dataloader(args, normalizer = 'std', tod=False, dow=False, weather=False
     data = load_st_dataset(args.dataset)        # B, N, D
     #normalize st data
     data, scaler = normalize_dataset(data, normalizer, args.column_wise)
+    #create time data
+    #ipdb.set_trace()
+    T_embed = get_sinusoid_encoding_table(24,args.time_dim) # [24,d]
+    # change the shape to [62,24,12,170,d]
+    T_data = []
+    for i in range(62): 
+        T_temp = []  #[24,12,170,d]
+        for j in range(len(T_embed)):
+            T_temp1 = []  #[12,170,d]
+            for k in range(60//args.time_freq):
+                Tj = T_embed[j].view(1,args.time_dim)
+                T_temp1.append(torch.repeat_interleave(Tj,170,dim=0))
+            T_temp1 = torch.stack(T_temp1,dim=0)
+            T_temp.append(T_temp1)
+        T_temp = torch.stack(T_temp,dim=0)
+        T_data.append(T_temp)
+    T_data = torch.stack(T_data)
+    T_data = T_data.view(-1,170,args.time_dim)
+    # concat data and T 
+    data = np.concatenate((data,T_data),-1)
     #spilit dataset by days or by ratio
     if args.test_ratio > 1:
         data_train, data_val, data_test = split_data_by_days(data, args.val_ratio, args.test_ratio)
@@ -107,6 +127,18 @@ def get_dataloader(args, normalizer = 'std', tod=False, dow=False, weather=False
     test_dataloader = data_loader(x_test, y_test, args.batch_size, shuffle=False, drop_last=False)
     return train_dataloader, val_dataloader, test_dataloader, scaler
 
+def get_sinusoid_encoding_table(n_position, d_hid):
+    ''' Sinusoid position encoding table '''
+    # TODO: make it with torch instead of numpy
+
+    def get_position_angle_vec(position):
+        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
+
+    sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
+    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
+    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
+
+    return torch.FloatTensor(sinusoid_table)
 
 if __name__ == '__main__':
     import argparse
