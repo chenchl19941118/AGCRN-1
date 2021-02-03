@@ -49,6 +49,8 @@ class AGCRN(nn.Module):
         self.output_dim = args.output_dim
         self.horizon = args.horizon
         self.num_layers = args.num_layers
+        self.batch_size = args.batch_size
+        self.time_dim = args.time_dim 
 
         self.default_graph = args.default_graph
         self.node_embeddings = nn.Parameter(torch.randn(self.num_node, args.embed_dim), requires_grad=True)
@@ -57,9 +59,9 @@ class AGCRN(nn.Module):
                                 args.embed_dim, args.num_layers)
 
         #predictor
-        self.end_conv = nn.Conv2d(1, args.horizon * self.output_dim, kernel_size=(1, self.hidden_dim), bias=True)
-
-    def forward(self, source, targets, teacher_forcing_ratio=0.5):
+        self.end_conv = nn.Conv2d(1, args.horizon * self.output_dim, kernel_size=(1, self.hidden_dim+self.time_dim), bias=True)
+      
+    def forward(self, source, targets, Z_T, teacher_forcing_ratio=0.5):
         #source: B, T_1, N, D
         #target: B, T_2, N, D
         #supports = F.softmax(F.relu(torch.mm(self.nodevec1, self.nodevec1.transpose(0,1))), dim=1)
@@ -67,6 +69,8 @@ class AGCRN(nn.Module):
         init_state = self.encoder.init_hidden(source.shape[0])
         output, _ = self.encoder(source, init_state, self.node_embeddings)      #B, T, N, hidden
         output = output[:, -1:, :, :]                                   #B, 1, N, hidden
+        
+        output = torch.cat((output,Z_T[:,-1:,:,:]),dim=-1)
 
         #CNN based predictor
         output = self.end_conv((output))                         #B, T*C, N, 1
